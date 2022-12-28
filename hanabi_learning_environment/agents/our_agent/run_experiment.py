@@ -26,9 +26,9 @@ Methods in this module are usually referenced by |train.py|.
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
-
+import json
 import time
-
+import copy
 from third_party.dopamine import checkpointer
 from third_party.dopamine import iteration_statistics
 import dqn_agent
@@ -314,10 +314,56 @@ def run_one_episode(agent, environment, obs_stacker):
 
   # Keep track of per-player reward.
   reward_since_last_action = np.zeros(environment.players)
-
+  
+  ## 改了
+  json_observe_list = []
   while not is_done:
-    observations, reward, is_done, _ = environment.step(action.item())
-
+    observations, reward, is_done, _ = environment.step(action.item())  #.item目的是去除梯度（是int形式）
+    
+    if agent.eval_mode == True:
+      '''
+      if evaluate: 开始测试, 如果eval的话,需要记录observations和 actions。 先有动作再有observation,记住。
+      
+      若action是int则需要转换(RL 是 int 的):
+        在这里  observation is a dict
+        action是一个int, 需要转换成 HanabiMove type。这个class在pyhanabi.py中有wrap,原始的定义见 hanabi_lib/hanabi_move.h, hanabi_state.h, hanabi_game.h 以及对应.cc文件
+        
+        如需要引用c定义的lib, 使用ffi可以在py中使用c的库函数,样例见pyhanabi.py
+        
+        ## notice! move 在pyhanabi.py有wrapper,因此可以用pyhanabi.py的函数来做!!!!!  line 296
+        
+        动作type定义见pyhanabi.py line 286 && hanabi_lib/hanabi_move.h line 21 底下注释 
+      '''
+      ## 获取HanabiMove类型动作定义，为转dict做准备
+      move = environment.game.get_move(action.item())  ##理论上是HanabiMove type的class 参见hanabi_move.h.
+      ## 调用包装的函数，获取类型，具体定义见 pyhanabi.py line 286 && hanabi_lib/hanabi_move.h line 21 底下注释 
+      type_ = move.type()
+      action_dictionary = {'action_type': None, 'card_index':None, 'color': None, 'rank': None, 'target_offset': None}  # hanabi_move.h, line 36
+      ## 根据type生成action dictionary
+      action_dictionary['action_type'] = type_  ##都得加
+      #if type_ ==0:         ### INVALID = 0
+      if type_ == 1 or type_ == 2:                                  ### PLAY = 1; DISCARD = 2
+        action_dictionary['card_index'] = move.card_index()
+        
+      elif type_ == 3:                                              ### REVEAL_COLOR = 3
+        action_dictionary['color'] = move.color()
+        action_dictionary['target_offset'] = move.card_index()
+      elif type_ == 4:                                              ### REVEAL_RANK = 4
+        action_dictionary['rank'] = move.rank()
+        action_dictionary['target_offset'] = move.card_index()
+      elif type_ == 5:                                              ### DEAL = 5
+        action_dictionary['color'] = move.color()
+        action_dictionary['rank'] = move.rank()
+        action_dictionary['target_offset'] = move.card_index()
+      else:                                                         ### 错误
+        raise ValueError
+      
+      ##现在获得action_dictionary和 observations. 在observations中加入'player_action'这个信息：
+      new_observe = copy.deepcopy(observations)
+      new_observe['player_action'] = action_dictionary
+      json_observe_list.append(new_observe)
+      
+    
     modified_reward = max(reward, 0) if LENIENT_SCORE else reward
     total_reward += modified_reward
 
@@ -344,7 +390,8 @@ def run_one_episode(agent, environment, obs_stacker):
   agent.end_episode(reward_since_last_action)
 
   tf.logging.info('EPISODE: %d %g', step_number, total_reward)
-  return step_number, total_reward
+  
+  return step_number, total_reward, json_observe_list
 
 
 def run_one_phase(agent, environment, obs_stacker, min_steps, statistics,
@@ -368,7 +415,7 @@ def run_one_phase(agent, environment, obs_stacker, min_steps, statistics,
   num_episodes = 0
   sum_returns = 0.
 
-  while step_count < min_steps:
+  while step_count < min_steps:  ## run_one episode, episode代表一轮游戏。一个step是一轮游戏。 phase是一场游戏
     episode_length, episode_return = run_one_episode(agent, environment,
                                                      obs_stacker)
     statistics.append({
@@ -386,6 +433,7 @@ def run_one_phase(agent, environment, obs_stacker, min_steps, statistics,
 @gin.configurable
 def run_one_iteration(agent, environment, obs_stacker,
                       iteration, training_steps,
+                      save_json_dir = None,  ##加了
                       evaluate_every_n=100,
                       num_evaluation_games=100):
   """Runs one iteration of agent/environment interaction.
@@ -427,9 +475,20 @@ def run_one_iteration(agent, environment, obs_stacker,
     episode_data = []
     agent.eval_mode = True
     # Collect episode data for all games.
-    for _ in range(num_evaluation_games):
-      episode_data.append(run_one_episode(agent, environment, obs_stacker))
+    for iter in range(num_evaluation_games):  ## run_one_episode是一局，一个episode是一局。 num_evaluation_steps是多少个测试游戏
+      ## 改了，因为 run_one_episode还有存储json_dict
+      step_number, total_reward, json_observe_list = run_one_episode(agent, environment, obs_stacker)
+      episode_data.append(tuple(step_number, total_reward))
 
+      ## 根据 iter (测试游戏的局数)和 iteration(训练局数)来保存
+      data_name = str(iteration)+'_eval_'+str(iter)+'.json'
+      file_path = save_json_dir+data_name 
+      ## 存
+      with open(file_path, 'w', encoding='utf-8') as file:
+        file.write(json.dumps(json_observe_list, indent=2))
+        
+    tf.logging.info(f"successfully_save json files in iteration {iteration}.")
+      
     eval_episode_length, eval_episode_return = map(np.mean, zip(*episode_data))
 
     statistics.append({
@@ -491,6 +550,7 @@ def run_experiment(agent,
                    experiment_logger,
                    experiment_checkpointer,
                    checkpoint_dir,
+                   save_json_dir,  ##加了
                    num_iterations=200,
                    training_steps=5000,
                    logging_file_prefix='log',
@@ -506,7 +566,7 @@ def run_experiment(agent,
   for iteration in range(start_iteration, num_iterations):
     start_time = time.time()
     statistics = run_one_iteration(agent, environment, obs_stacker, iteration,
-                                   training_steps)
+                                   training_steps, save_json_dir)
     tf.logging.info('Iteration %d took %d seconds', iteration,
                     time.time() - start_time)
     start_time = time.time()
