@@ -416,8 +416,8 @@ def run_one_phase(agent, environment, obs_stacker, min_steps, statistics,
   sum_returns = 0.
 
   while step_count < min_steps:  ## run_one episode, episode代表一轮游戏。一个step是一轮游戏。 phase是一场游戏
-    episode_length, episode_return = run_one_episode(agent, environment,
-                                                     obs_stacker)
+    episode_length, episode_return, _ = run_one_episode(agent, environment,
+                                                     obs_stacker)  # 改了
     statistics.append({
         '{}_episode_lengths'.format(run_mode_str): episode_length,
         '{}_episode_returns'.format(run_mode_str): episode_return
