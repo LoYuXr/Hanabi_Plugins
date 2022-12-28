@@ -34,8 +34,12 @@ import numpy as np
 import replay_memory
 import tensorflow as tf
 
-
-slim = tf.contrib.slim
+if tf.__version__[0] == '2':
+    #tensorflow 版本是2.x
+    import tf.slim as slim
+    #注意需要pip install tf.slim
+else: ## old version
+    slim = tf.contrib.slim
 
 Transition = collections.namedtuple(
     'Transition', ['reward', 'observation', 'legal_actions', 'action', 'begin'])
