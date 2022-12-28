@@ -32,7 +32,7 @@ class ToMAgent(DQNAgent):
                ):
         ## agent的eval_mode直接继承于基类
         ToM_infer_states_size =  NotImplementedError
-        super.__init__(num_actions=num_actions, observation_size = observation_size, ToM_infer_states_size = ToM_infer_states_size, num_players = num_players)
+        super().__init__(num_actions=num_actions, observation_size = observation_size, ToM_infer_states_size = ToM_infer_states_size, num_players = num_players)
         
     
     def begin_episode(self, current_player, legal_actions, observation):  ##不确定
