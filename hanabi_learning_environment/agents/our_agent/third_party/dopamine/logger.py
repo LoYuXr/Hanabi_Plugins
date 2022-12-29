@@ -21,7 +21,8 @@ from __future__ import print_function
 import os
 import pickle
 import tensorflow as tf
-
+if tf.__version__[0] == '2':
+    tf = tf.compat.v1
 
 CHECKPOINT_DURATION = 4
 
@@ -45,11 +46,16 @@ class Logger(object):
       return
     # Try to create logging directory.
     try:
-      tf.gfile.MakeDirs(logging_dir)
+      if tf.__version__[0] == '1':  
+        gfile_ = tf.gfile
+      elif tf.__version__[0] == '2':
+        gfile_ = tf.compat.v1.gfile
+        
+      gfile_.MakeDirs(logging_dir)
     except tf.errors.PermissionDeniedError:
       # If it already exists, ignore exception.
       pass
-    if not tf.gfile.Exists(logging_dir):
+    if not gfile_.Exists(logging_dir):
       tf.logging.warning(
           'Could not create directory %s, logging will be disabled.',
           logging_dir)
@@ -86,6 +92,7 @@ class Logger(object):
       tf.logging.warning('Logging is disabled.')
       return
     log_file = self._generate_filename(filename_prefix, iteration_number)
+    
     with tf.gfile.GFile(log_file, 'w') as fout:
       pickle.dump(self.data, fout, protocol=pickle.HIGHEST_PROTOCOL)
     # After writing a checkpoint file, we garbage collect the log file
