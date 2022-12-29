@@ -34,10 +34,13 @@ from third_party.dopamine import iteration_statistics
 import dqn_agent
 import ToM_agent
 import gin.tf
-from hanabi_learning_environment import rl_env
+#from hanabi_learning_environment import rl_env
 import numpy as np
 import rainbow_agent
 import tensorflow as tf
+import sys
+sys.path.append('/code/CoRE_Project/hanabi_learning_environment')
+import rl_env
 
 LENIENT_SCORE = False
 
@@ -150,7 +153,7 @@ def create_obs_stacker(environment, history_size=4):
 
 
 @gin.configurable
-def create_agent(environment, obs_stacker, agent_type='ToM_Agent'):
+def create_agent(environment, obs_stacker, agent_type='DQN'):
   """Creates the Hanabi agent.
 
   Args:
@@ -231,8 +234,10 @@ def initialize_checkpointing(agent, experiment_logger, checkpoint_dir,
       assert 'current_iteration' in dqn_dictionary
       experiment_logger.data = dqn_dictionary['logs']
       start_iteration = dqn_dictionary['current_iteration'] + 1
-      tf.logging.info('Reloaded checkpoint and will start from iteration %d',
-                      start_iteration)
+      try:
+        tf.logging.info('Reloaded checkpoint and will start from iteration %d',start_iteration)
+      except:
+        tf.compat.v1.logging.info('Reloaded checkpoint and will start from iteration %d',start_iteration)
 
   return start_iteration, experiment_checkpointer
 
@@ -340,7 +345,7 @@ def run_one_episode(agent, environment, obs_stacker):
       type_ = move.type()
       action_dictionary = {'action_type': None, 'card_index':None, 'color': None, 'rank': None, 'target_offset': None}  # hanabi_move.h, line 36
       ## 根据type生成action dictionary
-      action_dictionary['action_type'] = type_  ##都得加
+      action_dictionary['action_type'] = int(type_)  ##都得加
       #if type_ ==0:         ### INVALID = 0
       if type_ == 1 or type_ == 2:                                  ### PLAY = 1; DISCARD = 2
         action_dictionary['card_index'] = move.card_index()
@@ -359,7 +364,29 @@ def run_one_episode(agent, environment, obs_stacker):
         raise ValueError
       
       ##现在获得action_dictionary和 observations. 在observations中加入'player_action'这个信息：
-      new_observe = copy.deepcopy(observations)
+      #print(observations, type(observations))  #dict type
+      #new_observe = copy.deepcopy(observations)
+      new_observe = {}
+      '''
+      问题：deepcopy无法作用多线程上
+      observations['player_observations'][i]这个dict中存在'pyhanabi'是HanabiObservation类型的，不可存到json file中
+      '''
+      cur_player_obs_list = []
+      for agent_dict in observations['player_observations']:  #n个dict
+        keys = list(agent_dict.keys())
+        cur_dict = {}
+        for i in range(len(keys)):
+          if keys[i] =='pyhanabi':  #HanabiObserve type
+            continue
+          cur_dict[keys[i]] = agent_dict[keys[i]]
+          
+        cur_player_obs_list.append(cur_dict)
+      new_observe['player_observations'] = cur_player_obs_list
+      new_observe['current_player'] = observations['current_player']
+
+        
+      #new_observe = observations
+      #print('finish copy')
       new_observe['player_action'] = action_dictionary
       json_observe_list.append(new_observe)
       
@@ -388,9 +415,11 @@ def run_one_episode(agent, environment, obs_stacker):
     reward_since_last_action[current_player] = 0
 
   agent.end_episode(reward_since_last_action)
-
-  tf.logging.info('EPISODE: %d %g', step_number, total_reward)
-  
+  try:
+    tf.logging.info('EPISODE: %d %g', step_number, total_reward)
+  except:
+    tf.compat.v1.logging.info('EPISODE: %d %g', step_number, total_reward)
+    
   return step_number, total_reward, json_observe_list
 
 
@@ -417,7 +446,7 @@ def run_one_phase(agent, environment, obs_stacker, min_steps, statistics,
 
   while step_count < min_steps:  ## run_one episode, episode代表一轮游戏。一个step是一轮游戏。 phase是一场游戏
     episode_length, episode_return, _ = run_one_episode(agent, environment,
-                                                     obs_stacker)  # 改了
+                                                     obs_stacker)
     statistics.append({
         '{}_episode_lengths'.format(run_mode_str): episode_length,
         '{}_episode_returns'.format(run_mode_str): episode_return
@@ -463,11 +492,17 @@ def run_one_iteration(agent, environment, obs_stacker,
       run_one_phase(agent, environment, obs_stacker, training_steps, statistics,
                     'train'))
   time_delta = time.time() - start_time
-  tf.logging.info('Average training steps per second: %.2f',
+
+  if tf.__version__[0] =='1':
+    logger = tf.logging
+  else:
+    logger = tf.compat.v1.logging
+    
+  logger.info('Average training steps per second: %.2f',
                   number_steps / time_delta)
 
   average_return = sum_returns / num_episodes
-  tf.logging.info('Average per episode return: %.2f', average_return)
+  logger.info('Average per episode return: %.2f', average_return)
   statistics.append({'average_return': average_return})
 
   # Also run an evaluation phase if desired.
@@ -478,7 +513,8 @@ def run_one_iteration(agent, environment, obs_stacker,
     for iter in range(num_evaluation_games):  ## run_one_episode是一局，一个episode是一局。 num_evaluation_steps是多少个测试游戏
       ## 改了，因为 run_one_episode还有存储json_dict
       step_number, total_reward, json_observe_list = run_one_episode(agent, environment, obs_stacker)
-      episode_data.append(tuple(step_number, total_reward))
+      #print(json_observe_list[0])
+      episode_data.append(tuple((step_number, total_reward)))
 
       ## 根据 iter (测试游戏的局数)和 iteration(训练局数)来保存
       data_name = str(iteration)+'_eval_'+str(iter)+'.json'
@@ -487,7 +523,7 @@ def run_one_iteration(agent, environment, obs_stacker,
       with open(file_path, 'w', encoding='utf-8') as file:
         file.write(json.dumps(json_observe_list, indent=2))
         
-    tf.logging.info(f"successfully_save json files in iteration {iteration}.")
+    logger.info(f"successfully_save json files in iteration {iteration}.")
       
     eval_episode_length, eval_episode_return = map(np.mean, zip(*episode_data))
 
@@ -495,7 +531,7 @@ def run_one_iteration(agent, environment, obs_stacker,
         'eval_episode_lengths': eval_episode_length,
         'eval_episode_returns': eval_episode_return
     })
-    tf.logging.info('Average eval. episode length: %.2f  Return: %.2f',
+    logger.info('Average eval. episode length: %.2f  Return: %.2f',
                     eval_episode_length, eval_episode_return)
   else:
     statistics.append({
@@ -557,9 +593,13 @@ def run_experiment(agent,
                    log_every_n=1,
                    checkpoint_every_n=1):
   """Runs a full experiment, spread over multiple iterations."""
-  tf.logging.info('Beginning training...')
+  if tf.__version__[0] == '1':
+    logger = tf.logging
+  else:
+    logger = tf.compat.v1.logging
+  logger.info('Beginning training...')
   if num_iterations <= start_iteration:
-    tf.logging.warning('num_iterations (%d) < start_iteration(%d)',
+    logger.warning('num_iterations (%d) < start_iteration(%d)',
                        num_iterations, start_iteration)
     return
 
@@ -567,15 +607,15 @@ def run_experiment(agent,
     start_time = time.time()
     statistics = run_one_iteration(agent, environment, obs_stacker, iteration,
                                    training_steps, save_json_dir)
-    tf.logging.info('Iteration %d took %d seconds', iteration,
+    logger.info('Iteration %d took %d seconds', iteration,
                     time.time() - start_time)
     start_time = time.time()
     log_experiment(experiment_logger, iteration, statistics,
                    logging_file_prefix, log_every_n)
-    tf.logging.info('Logging iteration %d took %d seconds', iteration,
+    logger.info('Logging iteration %d took %d seconds', iteration,
                     time.time() - start_time)
     start_time = time.time()
     checkpoint_experiment(experiment_checkpointer, agent, experiment_logger,
                           iteration, checkpoint_dir, checkpoint_every_n)
-    tf.logging.info('Checkpointing iteration %d took %d seconds', iteration,
+    logger.info('Checkpointing iteration %d took %d seconds', iteration,
                     time.time() - start_time)
