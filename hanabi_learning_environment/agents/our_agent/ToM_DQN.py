@@ -34,8 +34,26 @@ import numpy as np
 import replay_memory
 import tensorflow as tf
 
-
-slim = tf.contrib.slim   ## 介绍： https://blog.csdn.net/MOU_IT/article/details/82717745
+if tf.__version__[0] == '2':
+    #tensorflow 版本是2.x
+    import tf_slim as slim  ## 介绍： https://blog.csdn.net/MOU_IT/article/details/82717745
+    optimizer = tf.optimizers.RMSprop(
+                   learning_rate=.0025,
+                   decay=0.95,
+                   momentum=0.0,
+                   epsilon=1e-6,
+                   centered=True)
+    
+    #注意需要pip install tf.slim
+else: ## old version
+    slim = tf.contrib.slim
+    optimizer = tf.train.RMSPropOptimizer(
+                   learning_rate=.0025,
+                   decay=0.95,
+                   momentum=0.0,
+                   epsilon=1e-6,
+                   centered=True)
+    
 
 Transition = collections.namedtuple(
     'Transition', ['reward', 'observation', 'legal_actions', 'action', 'begin'])
@@ -118,12 +136,7 @@ class DQNAgent(object):
                graph_template=dqn_template,
                tf_device='/cpu:*',
                use_staging=True,
-               optimizer=tf.train.RMSPropOptimizer(
-                   learning_rate=.0025,
-                   decay=0.95,
-                   momentum=0.0,
-                   epsilon=1e-6,
-                   centered=True)):
+               optimizer=optimizer):
     """Initializes the agent and constructs its graph.
 
     Args:
