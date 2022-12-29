@@ -123,7 +123,7 @@ class DQNAgent(object):
                epsilon_eval=0.001,
                epsilon_decay_period=1000,
                graph_template=dqn_template,
-               tf_device='/cpu:*',
+               tf_device='/gpu:0',
                use_staging=True,
                optimizer=optimizer):
     """Initializes the agent and constructs its graph.
