@@ -34,12 +34,30 @@ import numpy as np
 import replay_memory
 import tensorflow as tf
 
+
 if tf.__version__[0] == '2':
     #tensorflow 版本是2.x
-    import tf.slim as slim
+    import tf_slim as slim
+    optimizer = tf.optimizers.RMSprop(
+                   learning_rate=.0025,
+                   decay=0.95,
+                   momentum=0.0,
+                   epsilon=1e-6,
+                   centered=True)
+    logger = tf.compat.v1.logging
+    tf.compat.v1.disable_eager_execution()
+    tf = tf.compat.v1
+    
     #注意需要pip install tf.slim
 else: ## old version
     slim = tf.contrib.slim
+    optimizer = tf.train.RMSPropOptimizer(
+                   learning_rate=.0025,
+                   decay=0.95,
+                   momentum=0.0,
+                   epsilon=1e-6,
+                   centered=True)
+    logger = tf.logging
 
 Transition = collections.namedtuple(
     'Transition', ['reward', 'observation', 'legal_actions', 'action', 'begin'])
@@ -107,12 +125,7 @@ class DQNAgent(object):
                graph_template=dqn_template,
                tf_device='/cpu:*',
                use_staging=True,
-               optimizer=tf.train.RMSPropOptimizer(
-                   learning_rate=.0025,
-                   decay=0.95,
-                   momentum=0.0,
-                   epsilon=1e-6,
-                   centered=True)):
+               optimizer=optimizer):
     """Initializes the agent and constructs its graph.
     Args:
       num_actions: int, number of actions the agent can take at any state.
@@ -138,19 +151,19 @@ class DQNAgent(object):
       optimizer: Optimizer instance used for learning.
     """
 
-    tf.logging.info('Creating %s agent with the following parameters:',
+    logger.info('Creating %s agent with the following parameters:',
                     self.__class__.__name__)
-    tf.logging.info('\t gamma: %f', gamma)
-    tf.logging.info('\t update_horizon: %f', update_horizon)
-    tf.logging.info('\t min_replay_history: %d', min_replay_history)
-    tf.logging.info('\t update_period: %d', update_period)
-    tf.logging.info('\t target_update_period: %d', target_update_period)
-    tf.logging.info('\t epsilon_train: %f', epsilon_train)
-    tf.logging.info('\t epsilon_eval: %f', epsilon_eval)
-    tf.logging.info('\t epsilon_decay_period: %d', epsilon_decay_period)
-    tf.logging.info('\t tf_device: %s', tf_device)
-    tf.logging.info('\t use_staging: %s', use_staging)
-    tf.logging.info('\t optimizer: %s', optimizer)
+    logger.info('\t gamma: %f', gamma)
+    logger.info('\t update_horizon: %f', update_horizon)
+    logger.info('\t min_replay_history: %d', min_replay_history)
+    logger.info('\t update_period: %d', update_period)
+    logger.info('\t target_update_period: %d', target_update_period)
+    logger.info('\t epsilon_train: %f', epsilon_train)
+    logger.info('\t epsilon_eval: %f', epsilon_eval)
+    logger.info('\t epsilon_decay_period: %d', epsilon_decay_period)
+    logger.info('\t tf_device: %s', tf_device)
+    logger.info('\t use_staging: %s', use_staging)
+    logger.info('\t optimizer: %s', optimizer)
 
     # Global variables.
     self.num_actions = num_actions
