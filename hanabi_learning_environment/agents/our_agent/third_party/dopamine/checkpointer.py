@@ -50,6 +50,8 @@ from __future__ import print_function
 import os
 import pickle
 import tensorflow as tf
+if tf.__version__[0] =='2':
+    tf = tf.compat.v1
 
 CHECKPOINT_DURATION = 4
 
