@@ -153,7 +153,7 @@ def create_obs_stacker(environment, history_size=4):
 
 
 @gin.configurable
-def create_agent(environment, obs_stacker, agent_type='DQN'):
+def create_agent(environment, obs_stacker, agent_type='Rainbow'):
   """Creates the Hanabi agent.
 
   Args:
@@ -291,7 +291,63 @@ def parse_observations(observations, num_actions, obs_stacker):
   observation_vector = obs_stacker.get_observation_stack(current_player)
 
   return current_player, legal_moves, observation_vector
-
+def parse_state_action(environment, observations, action):
+  """ 为了保存成json文件，对observations和根据observation产生的action进行合并，返回一个dict """
+  '''
+      如果eval的话,需要记录observations和 actions。 先有动作再有observation,记住。
+      若action是int则需要转换(RL 是 int 的):
+        在这里  observation is a dict
+        action是一个int, 需要转换成 HanabiMove type。这个class在pyhanabi.py中有wrap,原始的定义见
+        hanabi_lib/hanabi_move.h, hanabi_state.h, hanabi_game.h 以及对应.cc文件
+        
+        如需要引用c定义的lib, 使用ffi可以在py中使用c的库函数,样例见pyhanabi.py
+        ## notice! move 在pyhanabi.py有wrapper,因此可以用pyhanabi.py的函数来做!!!!!  line 296
+        动作type定义见pyhanabi.py line 286 && hanabi_lib/hanabi_move.h line 21 底下注释 
+  '''
+  ## 获取HanabiMove类型动作定义，为转dict做准备
+  move = environment.game.get_move(action.item())  ##理论上是HanabiMove type的class 参见hanabi_move.h.
+  ## 调用包装的函数，获取类型，具体定义见 pyhanabi.py line 286 && hanabi_lib/hanabi_move.h line 21 底下注释 
+  type_ = move.type()
+  action_dictionary = {'action_type': None, 'card_index':None, 'color': None, 'rank': None, 'target_offset': None}  # hanabi_move.h, line 36
+  ## 根据type生成action dictionary
+  action_dictionary['action_type'] = int(type_)  ##都得加
+  #if type_ ==0:         ### INVALID = 0
+  if type_ == 1 or type_ == 2:                                  ### PLAY = 1; DISCARD = 2
+    action_dictionary['card_index'] = move.card_index()
+      
+  elif type_ == 3:                                              ### REVEAL_COLOR = 3
+    action_dictionary['color'] = move.color()
+    action_dictionary['target_offset'] = move.card_index()
+  elif type_ == 4:                                              ### REVEAL_RANK = 4
+    action_dictionary['rank'] = move.rank()
+    action_dictionary['target_offset'] = move.card_index()
+  elif type_ == 5:                                              ### DEAL = 5
+    action_dictionary['color'] = move.color()
+    action_dictionary['rank'] = move.rank()
+    action_dictionary['target_offset'] = move.card_index()
+  else:                                                         ### 错误
+    raise ValueError
+      
+  ##现在获得action_dictionary和 observations. 在observations中加入'player_action'这个信息：
+  new_observe = {}
+  '''
+  问题：deepcopy无法作用多线程上
+  observations['player_observations'][i]这个dict中存在'pyhanabi'是HanabiObservation类型的，不可存到json file中
+  '''
+  cur_player_obs_list = []
+  for agent_dict in observations['player_observations']:  #n个dict
+    keys = list(agent_dict.keys())
+    cur_dict = {}
+    for i in range(len(keys)):
+      if keys[i] =='pyhanabi':  #HanabiObserve type
+        continue
+      cur_dict[keys[i]] = agent_dict[keys[i]]
+    cur_player_obs_list.append(cur_dict)
+  new_observe['player_observations'] = cur_player_obs_list
+  new_observe['current_player'] = observations['current_player']
+  new_observe['player_action'] = action_dictionary
+  return new_observe
+      
 
 def run_one_episode(agent, environment, obs_stacker):
   """Runs the agent on a single game of Hanabi in self-play mode.
@@ -305,11 +361,12 @@ def run_one_episode(agent, environment, obs_stacker):
     step_number: int, number of actions in this episode.
     total_reward: float, undiscounted return for this episode.
   """
+  json_observe_list = []  ##如果eval,记录json数据
   obs_stacker.reset_stack()
-  observations = environment.reset()
+  observations = environment.reset()   ##initial obs
   current_player, legal_moves, observation_vector = (
       parse_observations(observations, environment.num_moves(), obs_stacker))
-  action = agent.begin_episode(current_player, legal_moves, observation_vector)
+  action = agent.begin_episode(current_player, legal_moves, observation_vector)  ##first action
 
   is_done = False
   total_reward = 0
@@ -321,75 +378,11 @@ def run_one_episode(agent, environment, obs_stacker):
   reward_since_last_action = np.zeros(environment.players)
   
   ## 改了
-  json_observe_list = []
+  if agent.eval_mode == True:
+    json_observe_list.append(parse_state_action(environment, observations, action))
+  
   while not is_done:
     observations, reward, is_done, _ = environment.step(action.item())  #.item目的是去除梯度（是int形式）
-    
-    if agent.eval_mode == True:
-      '''
-      if evaluate: 开始测试, 如果eval的话,需要记录observations和 actions。 先有动作再有observation,记住。
-      
-      若action是int则需要转换(RL 是 int 的):
-        在这里  observation is a dict
-        action是一个int, 需要转换成 HanabiMove type。这个class在pyhanabi.py中有wrap,原始的定义见 hanabi_lib/hanabi_move.h, hanabi_state.h, hanabi_game.h 以及对应.cc文件
-        
-        如需要引用c定义的lib, 使用ffi可以在py中使用c的库函数,样例见pyhanabi.py
-        
-        ## notice! move 在pyhanabi.py有wrapper,因此可以用pyhanabi.py的函数来做!!!!!  line 296
-        
-        动作type定义见pyhanabi.py line 286 && hanabi_lib/hanabi_move.h line 21 底下注释 
-      '''
-      ## 获取HanabiMove类型动作定义，为转dict做准备
-      move = environment.game.get_move(action.item())  ##理论上是HanabiMove type的class 参见hanabi_move.h.
-      ## 调用包装的函数，获取类型，具体定义见 pyhanabi.py line 286 && hanabi_lib/hanabi_move.h line 21 底下注释 
-      type_ = move.type()
-      action_dictionary = {'action_type': None, 'card_index':None, 'color': None, 'rank': None, 'target_offset': None}  # hanabi_move.h, line 36
-      ## 根据type生成action dictionary
-      action_dictionary['action_type'] = int(type_)  ##都得加
-      #if type_ ==0:         ### INVALID = 0
-      if type_ == 1 or type_ == 2:                                  ### PLAY = 1; DISCARD = 2
-        action_dictionary['card_index'] = move.card_index()
-        
-      elif type_ == 3:                                              ### REVEAL_COLOR = 3
-        action_dictionary['color'] = move.color()
-        action_dictionary['target_offset'] = move.card_index()
-      elif type_ == 4:                                              ### REVEAL_RANK = 4
-        action_dictionary['rank'] = move.rank()
-        action_dictionary['target_offset'] = move.card_index()
-      elif type_ == 5:                                              ### DEAL = 5
-        action_dictionary['color'] = move.color()
-        action_dictionary['rank'] = move.rank()
-        action_dictionary['target_offset'] = move.card_index()
-      else:                                                         ### 错误
-        raise ValueError
-      
-      ##现在获得action_dictionary和 observations. 在observations中加入'player_action'这个信息：
-      #print(observations, type(observations))  #dict type
-      #new_observe = copy.deepcopy(observations)
-      new_observe = {}
-      '''
-      问题：deepcopy无法作用多线程上
-      observations['player_observations'][i]这个dict中存在'pyhanabi'是HanabiObservation类型的，不可存到json file中
-      '''
-      cur_player_obs_list = []
-      for agent_dict in observations['player_observations']:  #n个dict
-        keys = list(agent_dict.keys())
-        cur_dict = {}
-        for i in range(len(keys)):
-          if keys[i] =='pyhanabi':  #HanabiObserve type
-            continue
-          cur_dict[keys[i]] = agent_dict[keys[i]]
-          
-        cur_player_obs_list.append(cur_dict)
-      new_observe['player_observations'] = cur_player_obs_list
-      new_observe['current_player'] = observations['current_player']
-
-        
-      #new_observe = observations
-      #print('finish copy')
-      new_observe['player_action'] = action_dictionary
-      json_observe_list.append(new_observe)
-      
     
     modified_reward = max(reward, 0) if LENIENT_SCORE else reward
     total_reward += modified_reward
@@ -413,6 +406,9 @@ def run_one_episode(agent, environment, obs_stacker):
 
     # Reset this player's reward accumulator.
     reward_since_last_action[current_player] = 0
+      
+    if agent.eval_mode == True:  ##先有 observations, 再有action
+      json_observe_list.append(parse_state_action(environment, observations, action))
 
   agent.end_episode(reward_since_last_action)
   try:
@@ -467,7 +463,7 @@ def run_one_iteration(agent, environment, obs_stacker,
                       num_evaluation_games=100):
   """Runs one iteration of agent/environment interaction.
 
-  An iteration involves running several episodes until a certain number of
+  An iteration involves running several episodes until a certain number ofDQN'
   steps are obtained.
 
   Args:
