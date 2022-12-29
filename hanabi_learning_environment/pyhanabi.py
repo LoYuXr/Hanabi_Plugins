@@ -18,9 +18,11 @@ import re
 import cffi
 import enum
 import sys
+sys.path.append('/code/CoRE_Project/hanabi_learning_environment')
 
 DEFAULT_CDEF_PREFIXES = (None, ".", os.path.dirname(__file__), "/include")
-DEFAULT_LIB_PREFIXES = (None, ".", os.path.dirname(__file__), "/lib")
+DEFAULT_LIB_PREFIXES = (None, ".", os.path.dirname(__file__), "/lib", os.path.dirname(__file__)+'/hanabi_lib')
+print(DEFAULT_LIB_PREFIXES)
 PYHANABI_HEADER = "pyhanabi.h"
 PYHANABI_LIB = ["libpyhanabi.so", "libpyhanabi.dylib"]
 COLOR_CHAR = ["R", "Y", "G", "W", "B"]  # consistent with hanabi_lib/util.cc
@@ -976,3 +978,4 @@ class ObservationEncoder(object):
 try_cdef()
 if cdef_loaded():
   try_load()
+  print(cdef_loaded_flag, lib)
