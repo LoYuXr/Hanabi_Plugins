@@ -396,7 +396,9 @@ def run_one_episode(agent, environment, obs_stacker):
         parse_observations(observations, environment.num_moves(), obs_stacker))
     if current_player in has_played:
       action = agent.step(reward_since_last_action[current_player],
-                          current_player, legal_moves, observation_vector)
+                          current_player, legal_moves, observation_vector, observations)
+      # yhx 加了传入observations(dict)，只在我出牌或弃牌时确认是什么牌，不用于获取仍在我手中的牌的信息
+      
     else:
       # Each player begins the episode on their first turn (which may not be
       # the first move of the game).

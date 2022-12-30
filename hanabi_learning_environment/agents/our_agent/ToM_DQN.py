@@ -323,6 +323,81 @@ class DQNAgent(object):
       sync_qt_ops.append(w_target.assign(w_online, use_locking=True))
     return sync_qt_ops
 
+  # yhx
+  def _intrinsic_reward(self, obs_dict, action_id):
+    """在obs_dict的状态下作出action_id的动作, 返回离散的intrinsic reward
+
+    Args:
+      obs_dict: dict, the current observation returned by the environment, including all agents' observation
+      action_id: int, in the legal_moves_as_int
+
+    Returns:
+      intrinsic_reward
+    """
+
+    # COLOR_CHAR = ["R", "Y", "G", "W", "B"]
+    intrinsic_reward = 0.0
+    set_reward = {'reveal_play': 0.5, 'reveal_cnt': 0.3, 'discard_useless': 0.3, 'discard_useful': -0.5, 'play_wrong': -1}
+    player_id = obs_dict['current_player']
+    player_obs = obs_dict['player_observations'][player_id]
+    cur_fireworks = player_obs['fireworks']
+    action_idx = player_obs['legal_moves_as_int'].index(action_id) # 未测试
+    action_dict = player_obs['legal_moves'][action_idx]
+    action_type = action_dict['action_type']
+    cur_player_observed_hands = player_obs['observed_hands']
+        
+    if action_type == 'REVEAL_COLOR' or action_type == 'REVEAL_RANK':
+      target_offset = action_dict['target_offset'] # target_offset和observed_hands一致
+      target_hand = cur_player_observed_hands[target_offset]
+      if action_type == 'REVEAL_COLOR':
+        color = action_dict['color']
+        for card in target_hand:
+          if card['color'] == color:
+            intrinsic_reward += set_reward['reveal_cnt']
+            if card['rank'] == cur_fireworks[color]:
+              intrinsic_reward += set_reward['reveal_play']
+        
+      else:
+        rank = action_dict['rank']
+        for card in target_hand:
+          if card['rank'] == rank:
+            intrinsic_reward += set_reward['reveal_cnt']
+            if cur_fireworks[card['color']] == rank:
+              intrinsic_reward += set_reward['reveal_play']
+      
+      return intrinsic_reward
+
+    elif action_type == 'DISCARD':
+      if player_id == 0:
+        other_obs_dict = obs_dict['player_observations'][1]
+        player_hand = other_obs_dict['observed_hands'][-1]
+      else:
+        other_obs_dict = obs_dict['player_observations'][0]
+        player_hand = other_obs_dict['observed_hands'][player_id]
+      
+      card = player_hand[action_dict['card_index']]
+      if cur_fireworks[card['color']] <= card['rank']:
+        intrinsic_reward += set_reward['discard_useful']
+      
+      else:
+        intrinsic_reward += set_reward['discard_useless']
+
+      return intrinsic_reward
+
+    elif action_type == 'PLAY':
+      if player_id == 0:
+        other_obs_dict = obs_dict['player_observations'][1]
+        player_hand = other_obs_dict['observed_hands'][-1]
+      else:
+        other_obs_dict = obs_dict['player_observations'][0]
+        player_hand = other_obs_dict['observed_hands'][player_id]  
+
+      card = player_hand[action_dict['card_index']]
+      if cur_fireworks[card['color']] != card['rank']:
+        intrinsic_reward += set_reward['play_wrong']
+
+      return intrinsic_reward
+
   def begin_episode(self, current_player, legal_actions, observation, ToM_infer_states):  ##加了
     """Returns the agent's first action.
 
@@ -348,7 +423,7 @@ class DQNAgent(object):
                             self.action, begin=True)
     return self.action
 
-  def step(self, reward, current_player, legal_actions, observation, ToM_infer_states):  ## 加了
+  def step(self, reward, current_player, legal_actions, observation, ToM_infer_states, obs_dict):  ## 加了# yhx 增加传入obs_dict
     """Stores observations from last transition and chooses a new action.
 
     Notifies the agent of the outcome of the latest transition and stores it
@@ -368,7 +443,9 @@ class DQNAgent(object):
     self._train_step()
 
     self.action = self._select_action(observation, ToM_infer_states,legal_actions)   ##加了
-    ## generate intrinsic loss 加了
+    ## yhx generate intrinsic loss 加了 
+    intrinsic_reward = self._intrinsic_reward(obs_dict, self.action)
+    reward += intrinsic_reward # ??
     
     
     self._record_transition(current_player, reward, observation, ToM_infer_states, legal_actions,  ##加了
