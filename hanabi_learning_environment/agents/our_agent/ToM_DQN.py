@@ -436,6 +436,7 @@ class DQNAgent(object):
       observation: `np.array`, the most recent observation.
       ### 加了
       ToM_infer_states: ToM模型对手牌概率估计
+      obs_dict: dict, the current observation returned by the environment, including all agents' observation
       
     Returns:
       A legal, int-valued action.

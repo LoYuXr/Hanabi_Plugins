@@ -304,7 +304,7 @@ class DQNAgent(object):
                             self.action, begin=True)
     return self.action
 
-  def step(self, reward, current_player, legal_actions, observation):
+  def step(self, reward, current_player, legal_actions, observation, obs_dict):
     """Stores observations from last transition and chooses a new action.
     Notifies the agent of the outcome of the latest transition and stores it
       in the replay memory, selects a new action and applies a training step.
@@ -313,6 +313,7 @@ class DQNAgent(object):
       current_player: int, the player whose turn it is.
       legal_actions: `np.array`, actions which the player can currently take.
       observation: `np.array`, the most recent observation.
+      obs_dict: dict, the current observation returned by the environment, including all agents' observation (no use)
     Returns:
       A legal, int-valued action.
     """
