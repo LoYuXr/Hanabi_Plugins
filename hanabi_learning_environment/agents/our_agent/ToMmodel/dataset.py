@@ -31,7 +31,7 @@ class ToMDataset(Dataset):
         self.config = Config()
         jsonfiles = os.listdir(path)
         self.data = []
-        for jsonfile in jsonfiles[:100]:
+        for jsonfile in jsonfiles:
             # print(jsonfile)
             with open(os.path.join(path, jsonfile)) as f:
                 self.data.extend(self.preprocess(json.load(f)))
