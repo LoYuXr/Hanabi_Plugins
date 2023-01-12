@@ -19,35 +19,30 @@ def train(model, dataloader, optimizer, device):
     rank_sum = 0.
     loss_sum = 0.
     data_num = 0
-    for data, target_color, target_rank in tqdm(dataloader):
+    for data, target_color, target_rank, target_card in tqdm(dataloader):
         optimizer.zero_grad()
         act_seq, obs = data
         act_seq = act_seq.to(device)
         obs = obs.to(device)
-        pred_color, pred_rank = model((act_seq, obs))
+        pred_card = model((act_seq, obs))
         target_color = target_color.to(device)
         target_rank = target_rank.to(device)
+        target_card = target_card.to(device)
 
-        pred_color = pred_color.permute(0, 2, 1)
-        pred_rank = pred_rank.permute(0, 2, 1)
+        pred_card = pred_card.permute(0,2,1) # (B,25,len)
+        # print(pred_card.shape, target_card.shape, target_color.shape)
 
-        loss_color = loss_fn(pred_color, target_color)
-        loss_rank = loss_fn(pred_rank, target_rank)
-        loss = loss_color + loss_rank
+        loss = loss_fn(pred_card, target_card)
         loss.backward()
         optimizer.step()
 
-        acc_color = (torch.argmax(pred_color, dim=1)
+        acc = (torch.argmax(pred_card, dim=1)
                      == target_color).float().mean()
-        acc_rank = (torch.argmax(pred_rank, dim=1)
-                    == target_rank).float().mean()
 
-        color_sum += acc_color.item()*len(data)
-        rank_sum += acc_rank.item()*len(data)
         loss_sum += loss.item()*len(data)
         data_num += len(data)
 
-        tqdm.write(f'loss_color: {loss_color.item():.4f}, loss_rank: {loss_rank.item():.4f}, loss: {loss.item():.4f}, color_avg: {color_sum/data_num:.4f}, rank_avg: {rank_sum/data_num:.4f}, loss_avg: {loss_sum/data_num:.4f}')
+        tqdm.write(f'loss: {loss.item():.4f}, loss_avg: {loss_sum/data_num:.4f}, acc: {acc.item():.4f}')
 
 
 def main():
