@@ -3,15 +3,15 @@ import rainbow_agent
 import run_experiment
 
 # This configures the DQN Agent.
-AGENT_CLASS = @DQNAgent
-DQNAgent.gamma = 0.99
-DQNAgent.update_horizon = 1
-DQNAgent.min_replay_history = 500 # agent steps
-DQNAgent.target_update_period = 500 # agent steps
-DQNAgent.epsilon_train = 0.0
-DQNAgent.epsilon_eval = 0.0
-DQNAgent.epsilon_decay_period = 1000 # agent steps
-DQNAgent.tf_device = '/gpu:0'  # '/cpu:*' use for non-GPU version
+AGENT_CLASS = @dqn_agent.DQNAgent
+dqn_agent.DQNAgent.gamma = 0.99
+dqn_agent.DQNAgent.update_horizon = 1
+dqn_agent.DQNAgent.min_replay_history = 500 # agent steps
+dqn_agent.DQNAgent.target_update_period = 500 # agent steps
+dqn_agent.DQNAgent.epsilon_train = 0.0
+dqn_agent.DQNAgent.epsilon_eval = 0.0
+dqn_agent.DQNAgent.epsilon_decay_period = 1000 # agent steps
+dqn_agent.DQNAgent.tf_device = '/gpu:0'  # '/cpu:*' use for non-GPU version
 
 # This configures the Rainbow agent.
 AGENT_CLASS_2 = @RainbowAgent
@@ -25,6 +25,17 @@ RainbowAgent.epsilon_eval = 0.0
 RainbowAgent.epsilon_decay_period = 1000 # agent steps
 RainbowAgent.tf_device = '/gpu:0'  # '/cpu:*' use for non-GPU version
 WrappedReplayMemory.replay_capacity = 50000 
+
+# This configures the ToM_DQN Agent.
+AGENT_CLASS = @ToM_DQN.DQNAgent
+ToM_DQN.DQNAgent.gamma = 0.99
+ToM_DQN.DQNAgent.update_horizon = 1
+ToM_DQN.DQNAgent.min_replay_history = 500 # agent steps
+ToM_DQN.DQNAgent.target_update_period = 500 # agent steps
+ToM_DQN.DQNAgent.epsilon_train = 0.0
+ToM_DQN.DQNAgent.epsilon_eval = 0.0
+ToM_DQN.DQNAgent.epsilon_decay_period = 1000 # agent steps
+ToM_DQN.DQNAgent.tf_device = '/gpu:0'  # '/cpu:*' use for non-GPU version
 
 run_experiment.training_steps = 10000
 run_experiment.num_iterations = 10005

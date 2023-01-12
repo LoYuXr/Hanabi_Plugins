@@ -30,6 +30,8 @@ from absl import flags
 from third_party.dopamine import logger
 
 import run_experiment
+import time
+import os
 
 FLAGS = flags.FLAGS
 
@@ -82,6 +84,13 @@ def launch_experiment():
   agent = run_experiment.create_agent(environment, obs_stacker)
 
   checkpoint_dir = '{}/checkpoints'.format(FLAGS.base_dir)
+  ## 加了，存checkpoints的路径
+  now = int(round(time.time()*1000))
+  now02 = time.strftime('%Y-%m-%d-%H:%M:%S',time.localtime(now/1000))
+  save_json_dir = './output/'+now02+'/'
+  if not os.path.exists(save_json_dir):
+       os.makedirs(save_json_dir)
+       
   start_iteration, experiment_checkpointer = (
       run_experiment.initialize_checkpointing(agent,
                                               experiment_logger,
@@ -92,6 +101,7 @@ def launch_experiment():
                                 obs_stacker,
                                 experiment_logger, experiment_checkpointer,
                                 checkpoint_dir,
+                                save_json_dir,
                                 logging_file_prefix=FLAGS.logging_file_prefix)
 
 

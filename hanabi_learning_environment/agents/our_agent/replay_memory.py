@@ -39,6 +39,14 @@ import pickle
 import gin.tf
 import numpy as np
 import tensorflow as tf
+if tf.__version__[0] == '2':
+  from tensorflow.python.ops.data_flow_ops import StagingArea
+  tf = tf.compat.v1
+  stagingarea = StagingArea
+else:
+  stagingarea = tf.contrib.staging.StagingArea
+
+    
 
 
 # This constant determines how many iterations a checkpoint is kept for.
@@ -81,16 +89,13 @@ class OutOfGraphReplayMemory(object):
     invalid_range: `np.array`, currently invalid indices.
   """
 
-  def __init__(self, num_actions, observation_size, ToM_infer_states_size, stack_size, replay_capacity,
+  def __init__(self, num_actions, observation_size, stack_size, replay_capacity,
                batch_size, update_horizon=1, gamma=1.0):
     """Data structure doing the heavy lifting.
 
     Args:
       num_actions: int, number of possible actions.
       observation_size: int, size of an input frame.
-      ##加了
-      ToM_infer_states_size: int, size of an input observation frame
-      
       stack_size: int, number of frames to use in state stack.
       replay_capacity: int, number of transitions to keep in memory.
       batch_size: int, batch size.
@@ -98,7 +103,6 @@ class OutOfGraphReplayMemory(object):
       gamma: float, the discount factor.
     """
     self._observation_size = observation_size
-    self.ToM_infer_states_size = ToM_infer_states_size
     self._num_actions = num_actions
     self._replay_capacity = replay_capacity
     self._batch_size = batch_size
@@ -115,19 +119,17 @@ class OutOfGraphReplayMemory(object):
     # Create numpy arrays used to store sampled transitions.
     self.observations = np.empty(
         (replay_capacity, observation_size), dtype=np.uint8)
-    self.ToM_infer_states = np.empty(
-      (replay_capacity, ToM_infer_states_size), dtype = np.float32)  ##加了
     self.actions = np.empty((replay_capacity), dtype=np.int32)
     self.rewards = np.empty((replay_capacity), dtype=np.float32)
     self.terminals = np.empty((replay_capacity), dtype=np.uint8)
     self.legal_actions = np.empty((replay_capacity, num_actions),
                                   dtype=np.float32)
-    self.reset_state_batch_arrays(batch_size)  ##reset next_state, state, next_tom, tom (均是batch)
+    self.reset_state_batch_arrays(batch_size)
     self.add_count = np.array(0)
 
     self.invalid_range = np.zeros((self._stack_size))
 
-  def add(self, observation, ToM_infer_state, action, reward, terminal, legal_actions):
+  def add(self, observation, action, reward, terminal, legal_actions):
     """Adds a transition to the replay memory.
 
     Since the next_observation in the transition will be the observation added
@@ -137,9 +139,6 @@ class OutOfGraphReplayMemory(object):
 
     Args:
       observation: `np.array` uint8, (observation_size).
-      ##加了
-      ToM_infer_state: 'np.array' float32
-      
       action: uint8, indicating the action in the transition.
       reward: float, indicating the reward received in the transition.
       terminal: uint8, acting as a boolean indicating whether the transition
@@ -148,16 +147,14 @@ class OutOfGraphReplayMemory(object):
     """
     if self.is_empty() or self.terminals[self.cursor() - 1] == 1:
       dummy_observation = np.zeros((self._observation_size))
-      dummy_ToM_infer_state = np.zeros((self.ToM_infer_states_size))  ##加了
       dummy_legal_actions = np.zeros((self._num_actions))
       for _ in range(self._stack_size - 1):
-        self._add(dummy_observation, dummy_ToM_infer_state, 0, 0, 0, dummy_legal_actions)  ##加了
-    self._add(observation, ToM_infer_state, action, reward, terminal, legal_actions) ##加了
+        self._add(dummy_observation, 0, 0, 0, dummy_legal_actions)
+    self._add(observation, action, reward, terminal, legal_actions)
 
-  def _add(self, observation, dummy_ToM_infer_state, action, reward, terminal, legal_actions):  ##加了
+  def _add(self, observation, action, reward, terminal, legal_actions):
     cursor = self.cursor()
     self.observations[cursor] = observation
-    self.ToM_infer_states[cursor] = dummy_ToM_infer_state  ##加了
     self.actions[cursor] = action
     self.rewards[cursor] = reward
     self.terminals[cursor] = terminal
@@ -206,12 +203,7 @@ class OutOfGraphReplayMemory(object):
   def get_observation_stack(self, index):
     state = self.get_stack(self.observations, index)
     return np.transpose(state, [1, 0])
-  
-  ## 加了，用来sample ToM states,仿照get_observation但可能后续需要调整
-  def get_ToM_infer_states_stack(self, index):  ##改了，但是因为不知道ToM格式所以后续需要调整
-    state = self.get_stack(self.ToM_infer_states, index)
-    return np.transpose(state, [1, 0])  ##不确定！！！
-  
+
   def get_terminal_stack(self, index):
     return self.get_stack(self.terminals, index)
 
@@ -254,16 +246,9 @@ class OutOfGraphReplayMemory(object):
   def reset_state_batch_arrays(self, batch_size):
     self._next_state_batch = np.empty(
         (batch_size, self._observation_size, self._stack_size), dtype=np.uint8)
-    ##加了？？？可能错误！！！
-    self._next_ToM_infer_state_batch = np.empty(
-        (batch_size, self.ToM_infer_states_size, self._stack_size), dtype = np.float32)
-    
     self._state_batch = np.empty(
         (batch_size, self._observation_size, self._stack_size), dtype=np.uint8)
-    ##加了？？？可能错误！！！
-    self._ToM_infer_state_batch = np.empty(
-        (batch_size, self.ToM_infer_states_size, self._stack_size), dtype = np.float32)
-    
+
   def sample_index_batch(self, batch_size):
     """Returns a batch of valid indices.
 
@@ -303,22 +288,16 @@ class OutOfGraphReplayMemory(object):
         sampling them.
 
     Returns:
-      Minibatch of transitions:  A tuple with elements  改了!!
-      
-      state_batch,  ToM_infer_state_batch,
-      action_batch, reward_batch,
-      next_state_batch, next_ToM_infer_state_batch
-      and terminal_batch. 
-      
-        The shape of state_batch and next_state_batch is (minibatch_size,
+      Minibatch of transitions:  A tuple with elements state_batch,
+        action_batch, reward_batch, next_state_batch and terminal_batch. The
+        shape of state_batch and next_state_batch is (minibatch_size,
         observation_size, stack_size) and the rest of tensors have
         shape (minibatch_size)
     """
     if batch_size is None:
       batch_size = self._batch_size
     if batch_size != self._state_batch.shape[0]:
-      self.reset_state_batch_arrays(batch_size)  
-      ##self._next_state_batch， self._state_batch， self._next_ToM_infer_state_batch， self._ToM_infer_state_batch 加了
+      self.reset_state_batch_arrays(batch_size)
     if not self.is_full():
       assert self.add_count >= batch_size, (
           'There is not enough to sample.'
@@ -338,11 +317,8 @@ class OutOfGraphReplayMemory(object):
 
     for batch_element, memory_index in enumerate(indices):
       indices_batch[batch_element] = memory_index
-      ##current states, ToM states 
+
       self._state_batch[batch_element] = self.get_observation_stack(
-          memory_index)
-      ##加了，不一定对！！
-      self._ToM_infer_state_batch[batch_element] = self.get_ToM_infer_states_stack(
           memory_index)
 
       # Compute indices in the replay memory up to n steps ahead.
@@ -370,19 +346,13 @@ class OutOfGraphReplayMemory(object):
 
       bootstrap_state_index = (
           (memory_index + self._update_horizon) % self._replay_capacity)
-      
-      #### sample next batch of transition states & oM states
       self._next_state_batch[batch_element] = (
           self.get_observation_stack(bootstrap_state_index))
-      ##加了,但不确定！！！！
-      self._next_ToM_infer_state_batch[batch_element] = (
-        self.get_ToM_infer_states_stack(bootstrap_state_index)
-        )
       next_legal_actions_batch[batch_element] = (
           self.legal_actions[bootstrap_state_index])
 
-    return (self._state_batch, self._ToM_infer_state_batch, action_batch, reward_batch,
-            self._next_state_batch, self._next_ToM_infer_state_batch, terminal_batch, indices_batch,  ##加了
+    return (self._state_batch, action_batch, reward_batch,
+            self._next_state_batch, terminal_batch, indices_batch,
             next_legal_actions_batch)
 
   def _generate_filename(self, checkpoint_dir, name, suffix):
@@ -489,7 +459,6 @@ class WrappedReplayMemory(object):
   def __init__(self,
                num_actions,
                observation_size,
-               ToM_infer_states_size, ##加了，注意模型初始化更改
                stack_size,
                use_staging=True,
                replay_capacity=1000000,
@@ -502,9 +471,6 @@ class WrappedReplayMemory(object):
     Args:
       num_actions: int, number of possible actions.
       observation_size: int, size of an input frame.
-      ## 加了
-      ToM_infer_states_size: int, size of ToM infer of 手牌
-      
       stack_size: int, number of frames to use in state stack.
       use_staging: bool, when True it would use a staging area to prefetch the
         next sampling batch.
@@ -533,15 +499,13 @@ class WrappedReplayMemory(object):
       self.memory = wrapped_memory
     else:
       self.memory = OutOfGraphReplayMemory(
-          num_actions, observation_size, ToM_infer_states_size, stack_size,  ##加了
+          num_actions, observation_size, stack_size,
           replay_capacity, batch_size, update_horizon, gamma)
 
     with tf.name_scope('replay'):
       with tf.name_scope('add_placeholders'):
         self.add_obs_ph = tf.placeholder(
             tf.uint8, [observation_size], name='add_obs_ph')
-        self.add_ToM_ph = tf.placeholder(
-          tf.float32, [ToM_infer_states_size], name = 'add_ToM_ph')
         self.add_action_ph = tf.placeholder(tf.int32, [], name='add_action_ph')
         self.add_reward_ph = tf.placeholder(
             tf.float32, [], name='add_reward_ph')
@@ -551,47 +515,43 @@ class WrappedReplayMemory(object):
             tf.float32, [num_actions], name='add_legal_actions_ph')
 
       add_transition_ph = [
-          self.add_obs_ph, self.add_ToM_ph, self.add_action_ph, self.add_reward_ph,  ##加了
+          self.add_obs_ph, self.add_action_ph, self.add_reward_ph,
           self.add_terminal_ph, self.add_legal_actions_ph
-      ] 
-      '''
-      transition 在self._add() 定义有
-      self.observations, self.ToM_infer_states, self.actions, self.rewards, self.terminals, self.legal_actions
-      '''
+      ]
 
       with tf.device('/cpu:*'):
-        self.add_transition_op = tf.py_func(  ##改了,如上
+        self.add_transition_op = tf.py_func(
             self.memory.add, add_transition_ph, [], name='replay_add_py_func')
-        
-        self.transition = tf.py_func(  ###改了！！
+
+        self.transition = tf.py_func(
             self.memory.sample_transition_batch, [],
-            [tf.uint8, tf.float32, tf.int32, tf.float32, tf.uint8, tf.float32, tf.uint8, tf.int32,  #idx 1, 5(第二、六)是ToM的
+            [tf.uint8, tf.int32, tf.float32, tf.uint8, tf.uint8, tf.int32,
              tf.float32],
             name='replay_sample_py_func')
 
         if use_staging:
           # To hide the py_func latency use a staging area to pre-fetch the next
           # batch of transitions.
-          (states, ToM_infer_states, actions, rewards, next_states, next_ToM_infer_states, ###加了改了！！
+          (states, actions, rewards, next_states,
            terminals, indices, next_legal_actions) = self.transition
           # StagingArea requires all the shapes to be defined.
           states.set_shape([batch_size, observation_size, stack_size])
-          ToM_infer_states.set_shape([batch_size, ToM_infer_states_size, stack_size])  ##改了,因为没确定ToM形式所以可能存在问题
           actions.set_shape([batch_size])
           rewards.set_shape([batch_size])
-          next_states.set_shape([batch_size, observation_size, stack_size])
-          next_ToM_infer_states.set_shape([batch_size, ToM_infer_states_size, stack_size])  ##改了,因为没确定ToM形式所以可能存在问题
+          next_states.set_shape(
+              [batch_size, observation_size, stack_size])
           terminals.set_shape([batch_size])
           indices.set_shape([batch_size])
           next_legal_actions.set_shape([batch_size, num_actions])
 
           # Create the staging area in CPU.
-          prefetch_area = tf.contrib.staging.StagingArea(  ##改了 idx 1, 5是ToM 和next ToM
-              [tf.uint8, tf.float32, tf.int32, tf.float32, tf.uint8, tf.float32, tf.uint8, tf.int32,
+          ##  prefetch_area = tf.contrib.staging.StagingArea([tf.uint8, tf.int32, tf.float32, tf.uint8, tf.uint8, tf.int32, tf.float32])
+          prefetch_area = stagingarea(
+              [tf.uint8, tf.int32, tf.float32, tf.uint8, tf.uint8, tf.int32,
                tf.float32])
 
-          self.prefetch_batch = prefetch_area.put(  ##改了
-              (states, ToM_infer_states, actions, rewards, next_states, next_ToM_infer_states, terminals, indices,
+          self.prefetch_batch = prefetch_area.put(
+              (states, actions, rewards, next_states, terminals, indices,
                next_legal_actions))
         else:
           self.prefetch_batch = tf.no_op()
@@ -601,17 +561,13 @@ class WrappedReplayMemory(object):
         # CPU to GPU.
         self.transition = prefetch_area.get()
 
-      (self.states, self.ToM_infer_states ,self.actions, self.rewards, self.next_states, self.next_ToM_infer_states, ##改了，不确定
+      (self.states, self.actions, self.rewards, self.next_states,
        self.terminals, self.indices, self.next_legal_actions) = self.transition
 
       # Since these are py_func tensors, no information about their shape is
       # present. Setting the shape only for the necessary tensors
       self.states.set_shape([None, observation_size, stack_size])
       self.next_states.set_shape([None, observation_size, stack_size])
-      ##改了，不确定
-      self.ToM_infer_states.set_shape([None, ToM_infer_states_size, stack_size])  ##改了,因为没确定ToM形式所以可能存在问题
-      self.next_ToM_infer_states.set_shape([None, ToM_infer_states_size, stack_size])  ##改了,因为没确定ToM形式所以可能存在问题
-      
 
   def save(self, checkpoint_dir, iteration_number):
     """Save the underlying replay memory's contents in a file.

@@ -32,7 +32,7 @@ class ToMAgent(DQNAgent):
                ):
         ## agent的eval_mode直接继承于基类
         ToM_infer_states_size =  NotImplementedError
-        super.__init__(num_actions=num_actions, observation_size = observation_size, ToM_infer_states_size = ToM_infer_states_size, num_players = num_players)
+        super().__init__(num_actions=num_actions, observation_size = observation_size, ToM_infer_states_size = ToM_infer_states_size, num_players = num_players)
         
     
     def begin_episode(self, current_player, legal_actions, observation):  ##不确定
@@ -44,13 +44,13 @@ class ToMAgent(DQNAgent):
         
         return super().begin_episode(current_player, legal_actions, observation, ToM_infer_states)
     
-    def step(self, reward, current_player, legal_actions, observation):
-        
+    def step(self, reward, current_player, legal_actions, observation, obs_dict):
+        # yhx 增加传入obs_dict
         ToM_infer_states ## 从ToM model中来
         
         ## 如上所述，self.step()和self.begin_episode()在ToM_DQN中没区别
         
-        return super().step(reward, current_player, legal_actions, observation, ToM_infer_states)
+        return super().step(reward, current_player, legal_actions, observation, ToM_infer_states, obs_dict)
     
     def end_episode(self, final_rewards):  ##不确定
         return super().end_episode(final_rewards)

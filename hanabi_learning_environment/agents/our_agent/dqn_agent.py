@@ -35,7 +35,29 @@ import replay_memory
 import tensorflow as tf
 
 
-slim = tf.contrib.slim
+if tf.__version__[0] == '2':
+    #tensorflow 版本是2.x
+    import tf_slim as slim
+    optimizer = tf.optimizers.RMSprop(
+                   learning_rate=.0025,
+                   decay=0.95,
+                   momentum=0.0,
+                   epsilon=1e-6,
+                   centered=True)
+    logger = tf.compat.v1.logging
+    tf.compat.v1.disable_eager_execution()
+    tf = tf.compat.v1
+    
+    #注意需要pip install tf.slim
+else: ## old version
+    slim = tf.contrib.slim
+    optimizer = tf.train.RMSPropOptimizer(
+                   learning_rate=.0025,
+                   decay=0.95,
+                   momentum=0.0,
+                   epsilon=1e-6,
+                   centered=True)
+    logger = tf.logging
 
 Transition = collections.namedtuple(
     'Transition', ['reward', 'observation', 'legal_actions', 'action', 'begin'])
@@ -101,14 +123,9 @@ class DQNAgent(object):
                epsilon_eval=0.001,
                epsilon_decay_period=1000,
                graph_template=dqn_template,
-               tf_device='/cpu:*',
+               tf_device='/gpu:0',
                use_staging=True,
-               optimizer=tf.train.RMSPropOptimizer(
-                   learning_rate=.0025,
-                   decay=0.95,
-                   momentum=0.0,
-                   epsilon=1e-6,
-                   centered=True)):
+               optimizer=optimizer):
     """Initializes the agent and constructs its graph.
     Args:
       num_actions: int, number of actions the agent can take at any state.
@@ -134,19 +151,19 @@ class DQNAgent(object):
       optimizer: Optimizer instance used for learning.
     """
 
-    tf.logging.info('Creating %s agent with the following parameters:',
+    logger.info('Creating %s agent with the following parameters:',
                     self.__class__.__name__)
-    tf.logging.info('\t gamma: %f', gamma)
-    tf.logging.info('\t update_horizon: %f', update_horizon)
-    tf.logging.info('\t min_replay_history: %d', min_replay_history)
-    tf.logging.info('\t update_period: %d', update_period)
-    tf.logging.info('\t target_update_period: %d', target_update_period)
-    tf.logging.info('\t epsilon_train: %f', epsilon_train)
-    tf.logging.info('\t epsilon_eval: %f', epsilon_eval)
-    tf.logging.info('\t epsilon_decay_period: %d', epsilon_decay_period)
-    tf.logging.info('\t tf_device: %s', tf_device)
-    tf.logging.info('\t use_staging: %s', use_staging)
-    tf.logging.info('\t optimizer: %s', optimizer)
+    logger.info('\t gamma: %f', gamma)
+    logger.info('\t update_horizon: %f', update_horizon)
+    logger.info('\t min_replay_history: %d', min_replay_history)
+    logger.info('\t update_period: %d', update_period)
+    logger.info('\t target_update_period: %d', target_update_period)
+    logger.info('\t epsilon_train: %f', epsilon_train)
+    logger.info('\t epsilon_eval: %f', epsilon_eval)
+    logger.info('\t epsilon_decay_period: %d', epsilon_decay_period)
+    logger.info('\t tf_device: %s', tf_device)
+    logger.info('\t use_staging: %s', use_staging)
+    logger.info('\t optimizer: %s', optimizer)
 
     # Global variables.
     self.num_actions = num_actions
@@ -287,7 +304,7 @@ class DQNAgent(object):
                             self.action, begin=True)
     return self.action
 
-  def step(self, reward, current_player, legal_actions, observation):
+  def step(self, reward, current_player, legal_actions, observation, obs_dict):
     """Stores observations from last transition and chooses a new action.
     Notifies the agent of the outcome of the latest transition and stores it
       in the replay memory, selects a new action and applies a training step.
@@ -296,6 +313,7 @@ class DQNAgent(object):
       current_player: int, the player whose turn it is.
       legal_actions: `np.array`, actions which the player can currently take.
       observation: `np.array`, the most recent observation.
+      obs_dict: dict, the current observation returned by the environment, including all agents' observation (no use)
     Returns:
       A legal, int-valued action.
     """
