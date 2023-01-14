@@ -13,19 +13,47 @@ class Config(object):
     obs_dim = 658
 
 
+color2idx = {
+    'R': 1,
+    'Y': 2,
+    'G': 3,
+    'W': 4,
+    'B': 5,
+}
+idx2colorfunc = ['R', 'Y', 'G', 'W', 'B']
+
+def idx2color(idx):
+    if idx is None:
+        return None
+    color = idx2colorfunc[idx]
+    return color
+
+
+def encode_card(color, rank):
+    if color is None:
+        if rank is None or rank == -1:
+            card = [1.0/25 for _ in range(25)]
+        else:
+            card = [1.0/5 if i // 5 == rank else 0 for i in range(25)]
+    else:
+        if rank is None:
+            card = [1.0/5 if i %
+                    5 == color2idx[color]-1 else 0 for i in range(25)]
+        else:
+            card = [1.0 if i % 5 == color2idx[color] -
+                    1 and i // 5 == rank else 0 for i in range(25)]
+
+    return card
+
+
 class ToMDataset(Dataset):
     def __init__(self, path, look_back=10):
         super(ToMDataset, self).__init__()
         self.look_back = look_back
         self.path = path
-        self.color2idx = {
-            'R': 1,
-            'Y': 2,
-            'G': 3,
-            'W': 4,
-            'B': 5,
-        }
-        self.idx2colorfunc= ['R', 'Y', 'G', 'W', 'B']
+        self.color2idx = color2idx
+        self.encode_card = encode_card
+        self.idx2color = idx2color
         self.max_discard = 20
 
         self.config = Config()
@@ -35,12 +63,6 @@ class ToMDataset(Dataset):
             # print(jsonfile)
             with open(os.path.join(path, jsonfile)) as f:
                 self.data.extend(self.preprocess(json.load(f)))
-
-    def idx2color(self, idx):
-        if idx is None:
-            return None
-        color = self.idx2colorfunc[idx]
-        return color
 
     def preprocess(self, datas):
         ret_data = []
@@ -57,18 +79,17 @@ class ToMDataset(Dataset):
                           for _ in range(self.config.num_cards-len(myhand))])
             myhandloc = 5
 
-
-
             target_color = torch.tensor(
-                [self.color2idx[card['color']] if card['color'] in self.color2idx else 0 for card in myhand]
+                [self.color2idx[card['color']] if card['color']
+                    in self.color2idx else 0 for card in myhand]
                 + [0 for _ in range(self.config.num_cards-len(myhand))])
             target_rank = torch.tensor(
-                [int(card['rank'])+1 if card['rank'] is not None else 0 for card in myhand]
+                [int(card['rank'])+1 if card['rank']
+                 is not None else 0 for card in myhand]
                 + [0 for _ in range(self.config.num_cards-len(myhand))])
             target_card = (target_rank-1)*5 + target_color-1
 
             act_seq = self.process_act(datas, i+self.look_back)
-            
 
             ret_data.append({
                 'data': (act_seq, cur_obs),
@@ -78,20 +99,6 @@ class ToMDataset(Dataset):
             })
 
         return ret_data
-
-    def encode_card(self, color, rank):
-        if color is None:
-            if rank is None or rank == -1:
-                card = [1.0/25 for _ in range(25)]
-            else:
-                card = [1.0/5 if i // 5 == rank else 0 for i in range(25)]
-        else:
-            if rank is None:
-                card = [1.0/5 if i % 5 == self.color2idx[color]-1 else 0 for i in range(25)]
-            else:
-                card = [1.0 if i % 5 == self.color2idx[color]-1 and i // 5 == rank else 0 for i in range(25)]
-        
-        return card
 
     def process_obs(self, obs):
 
@@ -104,7 +111,8 @@ class ToMDataset(Dataset):
         for hand in observed:
             obh.extend([self.encode_card(card['color'], card['rank'])
                        for card in hand])
-            obh.extend([self.encode_card(None,None) for _ in range(self.config.num_cards-len(hand))])
+            obh.extend([self.encode_card(None, None)
+                       for _ in range(self.config.num_cards-len(hand))])
         discard = obs['discard_pile']
         discard = [self.encode_card(card['color'], card['rank'])
                    for card in discard]
@@ -116,7 +124,8 @@ class ToMDataset(Dataset):
         for hand in cardknow:
             ck.extend([self.encode_card(card['color'], card['rank'])
                       for card in hand])
-            ck.extend([self.encode_card(None,None) for _ in range(self.config.num_cards-len(hand))])
+            ck.extend([self.encode_card(None, None)
+                      for _ in range(self.config.num_cards-len(hand))])
 
         ret.extend(fireworks)
         ret.extend(obh)
@@ -156,6 +165,70 @@ class ToMDataset(Dataset):
 
         return self.data[index]['data'], self.data[index]['target_color'], \
             self.data[index]['target_rank'], self.data[index]['target_card']
+
+
+def data_process(act_seq, obs, my_id):
+    '''
+    act_seq: json dict, len = lookback, need add action player id in it 
+    obs: json dict, len = 1 
+    my_id: int, my player id
+
+    Note : the model accept torch.tensor(return value of this func)
+    '''
+
+    config = Config()
+    max_discard = 10
+
+    def process_obs(obs):
+
+        ret = []
+        fireworks = obs['fireworks']
+        fireworks = [encode_card(color, rank)
+                     for color, rank in fireworks.items()]
+        observed = obs['observed_hands']
+        obh = []
+        for hand in observed:
+            obh.extend([encode_card(card['color'], card['rank'])
+                       for card in hand])
+            obh.extend([encode_card(None, None)
+                       for _ in range(config.num_cards-len(hand))])
+        discard = obs['discard_pile']
+        discard = [encode_card(card['color'], card['rank'])
+                   for card in discard]
+        discard = discard[-max_discard:]
+        discard.extend([[1.0/25 for _ in range(25)]
+                       for _ in range(max_discard-len(discard))])
+        cardknow = obs['card_knowledge']
+        ck = []
+        for hand in cardknow:
+            ck.extend([encode_card(card['color'], card['rank'])
+                      for card in hand])
+            ck.extend([encode_card(None, None)
+                      for _ in range(config.num_cards-len(hand))])
+
+        ret.extend(fireworks)
+        ret.extend(obh)
+        ret.extend(ck)
+        ret.extend(discard)
+
+        return ret
+
+    def process_act(raw_seq, my_id):
+        act_seq = []
+        myself = my_id
+        for i in range(len(raw_seq)):
+            cur_player = int(raw_seq[i]['current_player'])
+            cur_act = raw_seq[i]['player_action']
+            if cur_act['action_type'] in [3, 4] and \
+                    (cur_act['target_offset']+cur_player) % len(config.num_players) == myself:
+                act_seq.append(encode_card(
+                    idx2color(cur_act['color']), cur_act['rank']))
+            else:
+                act_seq.append(encode_card(None, None))
+        return act_seq
+    
+    return (process_act(act_seq, my_id), process_obs(obs))
+
 
 if __name__ == '__main__':
     dataset = ToMDataset('/home/yilue/datasets/pick_best_400')
