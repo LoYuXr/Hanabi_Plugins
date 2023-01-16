@@ -18,6 +18,7 @@ def train(model, dataloader, optimizer, device):
     color_sum = 0.
     rank_sum = 0.
     loss_sum = 0.
+    acc_sum = 0
     data_num = 0
     for data, target_color, target_rank, target_card in tqdm(dataloader):
         optimizer.zero_grad()
@@ -37,12 +38,17 @@ def train(model, dataloader, optimizer, device):
         optimizer.step()
 
         acc = (torch.argmax(pred_card, dim=1)
-                     == target_color).float().mean()
+                     == target_card)
+        data_num += acc.shape[0]
 
-        loss_sum += loss.item()*len(data)
-        data_num += len(data)
+        acc_sum += acc.sum().item()
+        acc = acc.float().mean()
 
-        tqdm.write(f'loss: {loss.item():.4f}, loss_avg: {loss_sum/data_num:.4f}, acc: {acc.item():.4f}')
+        loss_sum += loss.item()*act_seq.shape[0]
+
+        tqdm.write(f'loss: {loss.item():.4f}, loss_avg: {loss_sum/data_num:.4f}, acc: {acc.item():.4f}, '
+                   f'acc_avg: {acc_sum/data_num:.4f}'
+                    )
 
 
 def main():
@@ -53,7 +59,7 @@ def main():
     parser.add_argument('--look_back', type=int, default=10)
     parser.add_argument('--save_path', type=str, default='tom_ckpt')
     parser.add_argument('--data_path', type=str,
-                        default='/home/yilue/datasets/pick_best_400')
+                        default='/home/yilue/datasets/files')
     parser.add_argument('--device', type=str, default='cuda')
     args = parser.parse_args()
 

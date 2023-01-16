@@ -11,6 +11,8 @@ class Config(object):
     num_cards = 5
     num_actions = 5
     obs_dim = 658
+    vec_dim = 25
+    output_start = 5
 
 
 color2idx = {
@@ -45,9 +47,16 @@ def encode_card(color, rank):
 
     return card
 
+# def encode_card(color, rank):
+#     card = [0.0 for _ in range(10)]
+#     if color is not None:
+#         card[color2idx[color]-1] = 1.0
+#     if rank is not None and rank in range(5):
+#         card[5+rank] = 1.0
+#     return card
 
 class ToMDataset(Dataset):
-    def __init__(self, path, look_back=10):
+    def __init__(self, path, look_back=10, max_data_num=None):
         super(ToMDataset, self).__init__()
         self.look_back = look_back
         self.path = path
@@ -58,6 +67,8 @@ class ToMDataset(Dataset):
 
         self.config = Config()
         jsonfiles = os.listdir(path)
+        if max_data_num is not None:
+            jsonfiles = jsonfiles[:max_data_num]
         self.data = []
         for jsonfile in jsonfiles:
             # print(jsonfile)
@@ -117,7 +128,7 @@ class ToMDataset(Dataset):
         discard = [self.encode_card(card['color'], card['rank'])
                    for card in discard]
         discard = discard[-self.max_discard:]
-        discard.extend([[1.0/25 for _ in range(25)]
+        discard.extend([self.encode_card(None, None)
                        for _ in range(self.max_discard-len(discard))])
         cardknow = obs['card_knowledge']
         ck = []
@@ -196,7 +207,7 @@ def data_process(act_seq, obs, my_id):
         discard = [encode_card(card['color'], card['rank'])
                    for card in discard]
         discard = discard[-max_discard:]
-        discard.extend([[1.0/25 for _ in range(25)]
+        discard.extend([encode_card(None, None)
                        for _ in range(max_discard-len(discard))])
         cardknow = obs['card_knowledge']
         ck = []
