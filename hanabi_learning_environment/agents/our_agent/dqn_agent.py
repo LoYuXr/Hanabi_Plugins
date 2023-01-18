@@ -33,17 +33,19 @@ import gin.tf
 import numpy as np
 import replay_memory
 import tensorflow as tf
+import copy
+import torch
 
 
 if tf.__version__[0] == '2':
     #tensorflow 版本是2.x
     import tf_slim as slim
-    optimizer = tf.optimizers.RMSprop(
+    optimizer = tf.optimizers.legacy.RMSprop(
                    learning_rate=.0025,
                    decay=0.95,
                    momentum=0.0,
                    epsilon=1e-6,
-                   centered=True)
+                   centered=True) # tf!!
     logger = tf.compat.v1.logging
     tf.compat.v1.disable_eager_execution()
     tf = tf.compat.v1
@@ -102,6 +104,13 @@ def dqn_template(state, num_actions, layer_size=512, num_layers=1):
                              weights_initializer=weights_initializer)
   return net
 
+def load_pb(path_to_pb):
+    with tf.gfile.GFile(path_to_pb, 'rb') as f:
+        graph_def = tf.GraphDef()
+        graph_def.ParseFromString(f.read())
+    with tf.Graph().as_default() as graph:
+        tf.import_graph_def(graph_def, name='')
+        return graph
 
 @gin.configurable
 class DQNAgent(object):
@@ -125,7 +134,10 @@ class DQNAgent(object):
                graph_template=dqn_template,
                tf_device='/gpu:0',
                use_staging=True,
-               optimizer=optimizer):
+               optimizer=optimizer,
+               hcic=False,
+               goir=False,
+               path_to_pb=None):
     """Initializes the agent and constructs its graph.
     Args:
       num_actions: int, number of actions the agent can take at any state.
@@ -183,6 +195,8 @@ class DQNAgent(object):
     self.training_steps = 0
     self.batch_staged = False
     self.optimizer = optimizer
+    self.hcic = hcic
+    self.goir = goir    
 
     with tf.device(tf_device):
       # Calling online_convnet will generate a new graph as defined in
@@ -192,8 +206,8 @@ class DQNAgent(object):
       target_convnet = tf.make_template('Target', graph_template)
       # The state of the agent. The last axis is the number of past observations
       # that make up the state.
-      states_shape = (1, observation_size, stack_size)
-      self.state = np.zeros(states_shape)
+      states_shape = (1, observation_size, stack_size) # ???
+      self.state = np.zeros(states_shape) # (1, obs_size, 1)
       self.state_ph = tf.placeholder(tf.uint8, states_shape, name='state_ph')
       self.legal_actions_ph = tf.placeholder(tf.float32,
                                              [self.num_actions],
@@ -220,6 +234,15 @@ class DQNAgent(object):
     # This keeps tracks of the observed transitions during play, for each
     # player.
     self.transitions = [[] for _ in range(num_players)]
+
+    if self.hcic:
+      assert path_to_pb, "Path to pb is None"
+      tf_graph = load_pb(path_to_pb)
+      self._hcic_sess = tf.Session(graph=tf_graph)
+
+      self.hcic_output = tf_graph.get_tensor_by_name('output:0') # ??
+      self.hcic_input_act = tf_graph.get_tensor_by_name('act_seq:0')
+      self.hcic_input_obs = tf_graph.get_tensor_by_name('obs:0')
 
   def _build_replay_memory(self, use_staging):
     """Creates the replay memory used by the agent.
@@ -288,6 +311,81 @@ class DQNAgent(object):
       sync_qt_ops.append(w_target.assign(w_online, use_locking=True))
     return sync_qt_ops
 
+  # yhx
+  def _intrinsic_reward(self, obs_dict, action_id):
+    """在obs_dict的状态下作出action_id的动作, 返回离散的intrinsic reward
+
+    Args:
+      obs_dict: dict, the current observation returned by the environment, including all agents' observation
+      action_id: int, in the legal_moves_as_int
+
+    Returns:
+      intrinsic_reward
+    """
+    intrinsic_reward = 0.0
+    set_reward = {'reveal_play': 0.2, 'reveal_cnt': 0.2, 'discard_useless': 0.2, 'discard_useful': -0.2, 'play_wrong': -0.3, 'repeat_reveal': -0.1}
+    player_id = obs_dict['current_player']
+    player_obs = obs_dict['player_observations'][player_id]
+    cur_fireworks = player_obs['fireworks']
+    action_idx = player_obs['legal_moves_as_int'].index(action_id) # 未测试
+    action_dict = player_obs['legal_moves'][action_idx]
+    action_type = action_dict['action_type']
+    cur_player_observed_hands = player_obs['observed_hands']
+    card_knowledge = player_obs['card_knowledge'] # 0105
+        
+    if action_type == 'REVEAL_COLOR' or action_type == 'REVEAL_RANK':
+      target_offset = action_dict['target_offset'] # target_offset和observed_hands一致
+      target_hand = cur_player_observed_hands[target_offset]
+      target_knowledge = card_knowledge[target_offset] # 0105
+      if action_type == 'REVEAL_COLOR':
+        color = action_dict['color']
+        for card_idx in range(len(target_hand)):
+          if target_knowledge[card_idx]['color'] == color:
+            intrinsic_reward += set_reward['repeat_reveal']
+          elif target_hand[card_idx]['color'] == color and target_hand[card_idx]['rank'] == cur_fireworks[color]: 
+            intrinsic_reward += set_reward['reveal_play']
+        
+      else:
+        rank = action_dict['rank']
+        for card_idx in range(len(target_hand)):       
+          if target_knowledge[card_idx]['rank'] == rank:
+            intrinsic_reward += set_reward['repeat_reveal']
+          elif target_hand[card_idx]['rank'] == rank and cur_fireworks[target_hand[card_idx]['color']] == rank:
+            intrinsic_reward += set_reward['reveal_play']
+
+      return intrinsic_reward
+      
+    elif action_type == 'DISCARD':
+      if player_id == 0:
+        other_obs_dict = obs_dict['player_observations'][1]
+        player_hand = other_obs_dict['observed_hands'][-1]
+      else:
+        other_obs_dict = obs_dict['player_observations'][0]
+        player_hand = other_obs_dict['observed_hands'][player_id]
+      
+      card = player_hand[action_dict['card_index']]
+      if cur_fireworks[card['color']] <= card['rank']:
+        intrinsic_reward += set_reward['discard_useful']
+      
+      else:
+        intrinsic_reward += set_reward['discard_useless']
+
+      return intrinsic_reward
+
+    elif action_type == 'PLAY':
+      if player_id == 0:
+        other_obs_dict = obs_dict['player_observations'][1]
+        player_hand = other_obs_dict['observed_hands'][-1]
+      else:
+        other_obs_dict = obs_dict['player_observations'][0]
+        player_hand = other_obs_dict['observed_hands'][player_id]  
+
+      card = player_hand[action_dict['card_index']]
+      if cur_fireworks[card['color']] != card['rank']:
+        intrinsic_reward += set_reward['play_wrong']
+
+      return intrinsic_reward
+
   def begin_episode(self, current_player, legal_actions, observation):
     """Returns the agent's first action.
     Args:
@@ -298,13 +396,15 @@ class DQNAgent(object):
       A legal, int-valued action.
     """
     self._train_step()
+    if self.hcic:
+      observation = np.pad(observation, (0, self.observation_size-len(observation)), 'constant')
 
     self.action = self._select_action(observation, legal_actions)
     self._record_transition(current_player, 0, observation, legal_actions,
                             self.action, begin=True)
     return self.action
 
-  def step(self, reward, current_player, legal_actions, observation, obs_dict):
+  def step(self, reward, current_player, legal_actions, observation, obs_dict, data=None):
     """Stores observations from last transition and chooses a new action.
     Notifies the agent of the outcome of the latest transition and stores it
       in the replay memory, selects a new action and applies a training step.
@@ -313,14 +413,32 @@ class DQNAgent(object):
       current_player: int, the player whose turn it is.
       legal_actions: `np.array`, actions which the player can currently take.
       observation: `np.array`, the most recent observation.
-      obs_dict: dict, the current observation returned by the environment, including all agents' observation (no use)
+      obs_dict: dict, the current observation returned by the environment, including all agents' observation
     Returns:
       A legal, int-valued action.
     """
     self._train_step()
-
+    if self.hcic and data != None:
+      act_seq, obs = data
+      act_seq = torch.tensor(act_seq).unsqueeze(0)
+      obs = torch.tensor(obs).unsqueeze(0)
+      hcic_out = self._hcic_sess.run(self.hcic_output, feed_dict={self.hcic_input_act: act_seq, self.hcic_input_obs: obs}) # batch, num_cards, 25
+      hcic_out_np = hcic_out.reshape(1, -1).squeeze(0) # ???
+      observation = np.concatenate((observation, hcic_out_np))
+#       self.action = self._select_action(observation, legal_actions, hcic_out_np)
+    elif self.hcic and data == None:
+      observation = np.pad(observation, (0, self.observation_size-len(observation)), 'constant')
+    
     self.action = self._select_action(observation, legal_actions)
-    self._record_transition(current_player, reward, observation, legal_actions,
+
+    if self.goir:
+      _reward = copy.deepcopy(reward)
+      _intrinsic_reward = self._intrinsic_reward(obs_dict, self.action)
+      _reward += _intrinsic_reward
+      self._record_transition(current_player, _reward, observation, legal_actions,
+                            self.action)
+    else:
+      self._record_transition(current_player, reward, observation, legal_actions,
                             self.action)
     return self.action
 
@@ -380,7 +498,7 @@ class DQNAgent(object):
       # buffer.
       self.transitions[player] = []
 
-  def _select_action(self, observation, legal_actions):
+  def _select_action(self, observation, legal_actions, hcic_np=None):
     """Select an action from the set of allowed actions.
     Chooses an action randomly with probability self._calculate_epsilon(), and
     will otherwise choose greedily from the current q-value estimates.
@@ -404,6 +522,12 @@ class DQNAgent(object):
     else:
       # Convert observation into a batch-based format.
       self.state[0, :, 0] = observation
+#       self.state[0, :len(observation), 0] = observation
+#       if self.hcic:
+#         assert hcic_np, "hcic_np==None"
+#         self.state[0, len(observation):, 0] = hcic_np
+#       else:
+#         self.state[0, len(observation):, 0] = 0
 
       # Choose the action maximizing the q function for the current state.
       action = self._sess.run(self._q_argmax,
@@ -449,6 +573,7 @@ class DQNAgent(object):
       is_terminal: bool, indicating if the current state is a terminal state.
       legal_actions: Legal actions from the current state.
     """
+#     print(f"**************{observation.shape}***************")
     if not self.eval_mode:
       self._sess.run(
           self._replay.add_transition_op, {

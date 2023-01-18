@@ -37,7 +37,7 @@ import tensorflow as tf
 if tf.__version__[0] == '2':
     #tensorflow 版本是2.x
     import tf_slim as slim  ## 介绍： https://blog.csdn.net/MOU_IT/article/details/82717745
-    optimizer = tf.optimizers.RMSprop(
+    optimizer = tf.optimizers.legacy.RMSprop(
                    learning_rate=.0025,
                    decay=0.95,
                    momentum=0.0,

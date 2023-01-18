@@ -190,7 +190,7 @@ def data_process(act_seq, obs, my_id):
     '''
 
     config = Config()
-    max_discard = 10
+    max_discard = 20
 
     def process_obs(obs):
 
@@ -198,6 +198,7 @@ def data_process(act_seq, obs, my_id):
         fireworks = obs['fireworks']
         fireworks = [encode_card(color, rank)
                      for color, rank in fireworks.items()]
+#         print(torch.tensor(fireworks).shape)
         observed = obs['observed_hands']
         obh = []
         for hand in observed:
@@ -205,12 +206,14 @@ def data_process(act_seq, obs, my_id):
                        for card in hand])
             obh.extend([encode_card(None, None)
                        for _ in range(config.num_cards-len(hand))])
+#         print(torch.tensor(obh).shape)
         discard = obs['discard_pile']
         discard = [encode_card(card['color'], card['rank'])
                    for card in discard]
         discard = discard[-max_discard:]
         discard.extend([encode_card(None, None)
                        for _ in range(max_discard-len(discard))])
+#         print(torch.tensor(discard).shape)
         cardknow = obs['card_knowledge']
         ck = []
         for hand in cardknow:
@@ -218,6 +221,7 @@ def data_process(act_seq, obs, my_id):
                       for card in hand])
             ck.extend([encode_card(None, None)
                       for _ in range(config.num_cards-len(hand))])
+#         print(torch.tensor(ck).shape)
 
         ret.extend(fireworks)
         ret.extend(obh)
@@ -233,7 +237,7 @@ def data_process(act_seq, obs, my_id):
             cur_player = int(raw_seq[i]['current_player'])
             cur_act = raw_seq[i]['player_action']
             if cur_act['action_type'] in [3, 4] and \
-                    (cur_act['target_offset']+cur_player) % len(config.num_players) == myself:
+                    (cur_act['target_offset']+cur_player) % config.num_players == myself:
                 act_seq.append(encode_card(
                     idx2color(cur_act['color']), cur_act['rank']))
             else:
