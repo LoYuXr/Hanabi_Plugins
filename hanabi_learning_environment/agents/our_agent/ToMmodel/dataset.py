@@ -47,25 +47,25 @@ def encode_card(color, rank):
 
     return card
 
-# def encode_card(color, rank):
-#     card = [0.0 for _ in range(10)]
-#     if color is not None:
-#         card[color2idx[color]-1] = 1.0
-#     if rank is not None and rank in range(5):
-#         card[5+rank] = 1.0
-#     return card
+def encode_card_2head(color, rank):
+    card = [0.0 for _ in range(10)]
+    if color is not None:
+        card[color2idx[color]-1] = 1.0
+    if rank is not None and rank in range(5):
+        card[5+rank] = 1.0
+    return card
 
 class ToMDataset(Dataset):
-    def __init__(self, path, look_back=10, max_data_num=None):
+    def __init__(self, path, look_back=10, max_data_num=None, heads = 1, config=None):
         super(ToMDataset, self).__init__()
         self.look_back = look_back
         self.path = path
         self.color2idx = color2idx
-        self.encode_card = encode_card
+        self.encode_card = encode_card_2head if heads == 2 else encode_card
         self.idx2color = idx2color
         self.max_discard = 20
 
-        self.config = Config()
+        self.config = config if config is not None else Config()
         jsonfiles = os.listdir(path)
         if max_data_num is not None:
             jsonfiles = jsonfiles[:max_data_num]
@@ -118,6 +118,7 @@ class ToMDataset(Dataset):
         fireworks = [self.encode_card(color, rank)
                      for color, rank in fireworks.items()]
         observed = obs['observed_hands']
+        observed.extend([[] for _ in range(self.config.num_players-len(observed))])
         obh = []
         for hand in observed:
             obh.extend([self.encode_card(card['color'], card['rank'])
@@ -131,6 +132,7 @@ class ToMDataset(Dataset):
         discard.extend([self.encode_card(None, None)
                        for _ in range(self.max_discard-len(discard))])
         cardknow = obs['card_knowledge']
+        cardknow.extend([[] for _ in range(self.config.num_players-len(cardknow))])
         ck = []
         for hand in cardknow:
             ck.extend([self.encode_card(card['color'], card['rank'])
