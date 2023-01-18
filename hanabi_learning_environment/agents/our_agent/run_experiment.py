@@ -41,6 +41,7 @@ import tensorflow as tf
 import sys
 sys.path.append('/code/CoRE_Project/hanabi_learning_environment')
 import rl_env
+from ToMmodel import dataset
 
 LENIENT_SCORE = False
 
@@ -136,7 +137,7 @@ def create_environment(game_type='Hanabi-Full', num_players=2):
 
 
 @gin.configurable
-def create_obs_stacker(environment, history_size=4):
+def create_obs_stacker(environment, history_size=4, hcic=False):
   """Creates an observation stacker.
 
   Args:
@@ -153,7 +154,7 @@ def create_obs_stacker(environment, history_size=4):
 
 
 @gin.configurable
-def create_agent(environment, obs_stacker, agent_type='Rainbow'):
+def create_agent(environment, obs_stacker, agent_type='Rainbow', hcic=False, goir=False, path_to_pb=None):
   """Creates the Hanabi agent.
 
   Args:
@@ -172,10 +173,17 @@ def create_agent(environment, obs_stacker, agent_type='Rainbow'):
                               num_actions=environment.num_moves(),
                               num_players=environment.players)
   elif agent_type == 'Rainbow':
+    observation_size = obs_stacker.observation_size()
+    if hcic:
+      observation_size = observation_size + environment.game.hand_size() * 25 # ???
+
     return rainbow_agent.RainbowAgent(
-        observation_size=obs_stacker.observation_size(),
-        num_actions=environment.num_moves(),
-        num_players=environment.players)
+      observation_size=observation_size,
+      num_actions=environment.num_moves(),
+      num_players=environment.players,
+      hcic=hcic,
+      goir=goir,
+      path_to_pb=path_to_pb)
     
   elif agent_type == 'ToM_Agent':
     return ToM_agent.ToMAgent(
@@ -366,11 +374,12 @@ def run_one_episode(agent, environment, obs_stacker):
   observations = environment.reset()   ##initial obs
   current_player, legal_moves, observation_vector = (
       parse_observations(observations, environment.num_moves(), obs_stacker))
-  action = agent.begin_episode(current_player, legal_moves, observation_vector)  ##first action
+  action = agent.begin_episode(current_player, legal_moves, observation_vector)  ##first action (658,)
 
   is_done = False
   total_reward = 0
   step_number = 0
+  lookback = 10
 
   has_played = {current_player}
 
@@ -378,7 +387,7 @@ def run_one_episode(agent, environment, obs_stacker):
   reward_since_last_action = np.zeros(environment.players)
   
   ## 改了
-  if agent.eval_mode == True:
+  if agent.eval_mode == True or agent.hcic == True:
     json_observe_list.append(parse_state_action(environment, observations, action))
   
   while not is_done:
@@ -395,9 +404,15 @@ def run_one_episode(agent, environment, obs_stacker):
     current_player, legal_moves, observation_vector = (
         parse_observations(observations, environment.num_moves(), obs_stacker))
     if current_player in has_played:
-      action = agent.step(reward_since_last_action[current_player],
+      if agent.hcic == False or step_number < lookback:
+        action = agent.step(reward_since_last_action[current_player],
                           current_player, legal_moves, observation_vector, observations)
       # yhx 加了传入observations(dict)，只在我出牌或弃牌时确认是什么牌，不用于获取仍在我手中的牌的信息
+      else:
+        act_seq = [{'current_player': x['current_player'], 'player_action': x['player_action']} for x in json_observe_list[-lookback:]]
+        data = dataset.data_process(copy.deepcopy(act_seq), observations['player_observations'][current_player], current_player)
+        action = agent.step(reward_since_last_action[current_player],
+                          current_player, legal_moves, observation_vector, observations, data)
       
     else:
       # Each player begins the episode on their first turn (which may not be
@@ -409,7 +424,7 @@ def run_one_episode(agent, environment, obs_stacker):
     # Reset this player's reward accumulator.
     reward_since_last_action[current_player] = 0
       
-    if agent.eval_mode == True:  ##先有 observations, 再有action
+    if agent.eval_mode == True or agent.hcic == True:  ##先有 observations, 再有action
       json_observe_list.append(parse_state_action(environment, observations, action))
 
   agent.end_episode(reward_since_last_action)

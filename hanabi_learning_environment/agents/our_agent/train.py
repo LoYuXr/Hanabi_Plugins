@@ -58,6 +58,10 @@ flags.DEFINE_string('logging_dir', '',
 flags.DEFINE_string('logging_file_prefix', 'log',
                     'Prefix to use for the log files.')
 
+flags.DEFINE_boolean('hcic', False, 'HCIC')                   
+flags.DEFINE_boolean('goir', False, 'Intrinsic_reward')
+flags.DEFINE_string('path_to_pb', None,
+                    'Path to pb')
 
 def launch_experiment():
   """Launches the experiment.
@@ -80,8 +84,8 @@ def launch_experiment():
   experiment_logger = logger.Logger('{}/logs'.format(FLAGS.base_dir))
 
   environment = run_experiment.create_environment()
-  obs_stacker = run_experiment.create_obs_stacker(environment)
-  agent = run_experiment.create_agent(environment, obs_stacker)
+  obs_stacker = run_experiment.create_obs_stacker(environment, hcic=FLAGS.hcic)
+  agent = run_experiment.create_agent(environment, obs_stacker, hcic=FLAGS.hcic, goir=FLAGS.goir, path_to_pb=FLAGS.path_to_pb)
 
   checkpoint_dir = '{}/checkpoints'.format(FLAGS.base_dir)
   ## 加了，存checkpoints的路径
