@@ -5,7 +5,7 @@ from torch.utils.data.dataset import Dataset
 
 
 class Config(object):
-    num_players = 2
+    num_players = 2 # 3 or 4
     num_colors = 5
     num_ranks = 5
     num_cards = 5
@@ -190,7 +190,7 @@ def data_process(act_seq, obs, my_id):
     '''
 
     config = Config()
-    max_discard = 20
+    max_discard = 20 # {2:20,3:20,4:10} for different num_players 2,3 or 4
 
     def process_obs(obs):
 
