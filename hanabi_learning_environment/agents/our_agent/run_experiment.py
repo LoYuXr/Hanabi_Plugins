@@ -175,7 +175,7 @@ def create_agent(environment, obs_stacker, agent_type='Rainbow', hcic=False, goi
   elif agent_type == 'Rainbow':
     observation_size = obs_stacker.observation_size()
     if hcic:
-      observation_size = observation_size + environment.game.hand_size() * 25 # ???
+      observation_size = observation_size + 5 * 25 # environment.game.hand_size() * 25
 
     return rainbow_agent.RainbowAgent(
       observation_size=observation_size,
