@@ -65,11 +65,11 @@ def main():
 
     from dataset import Config
     config = Config()
-    config.num_players = 4
+    config.num_players = 2
     # config.output_start = 5
     config.output_start = 5
 
-    dataset = ToMDataset(args.data_path, args.look_back, config=config, max_data_num=100)
+    dataset = ToMDataset(args.data_path, args.look_back, config=config)
     dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True)
 
     model = ToMModel(dataconfig=dataset.config)
