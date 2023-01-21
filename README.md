@@ -8,7 +8,7 @@ We propose two novel plug-in modules to tackle the problem and boost the perform
 
 ### The Hanabi Learning Environment
 
-We use the Hanabi\_Learning\_Environment (HLE) for all experimentation. The file rl\_env.py provides an RL environment using an API similar to OpenAI Gym. A lower level game interface is provided in pyhanabi.py. Please follow the instructions to setup the environment. Our agent can be found in directory ./hanabi_learning_environment/agents/our_agent
+We use the Hanabi\_Learning\_Environment (HLE) for all experimentation. The file rl\_env.py provides an RL environment using an API similar to OpenAI Gym. A lower level game interface is provided in pyhanabi.py. Please follow the instructions to setup the environment. Our agent can be found in directory `./hanabi_learning_environment/agents/our_agent`
 
 ### Getting started
 Install the learning environment:
