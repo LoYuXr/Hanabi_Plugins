@@ -64,9 +64,15 @@ If you prefer to train a new model, please enter ToMmodel folder and run the fol
 python train.py
 ```
 
-Finally, we can run the RL agent. You can designate the game configuration in `configs/hanabi_rainbow.gin`, where you may change the player numbers and running iterations. The entry point to run a Rainbow agent on the Hanabi environment is `train.py`.
+Finally, we can run the RL agent. You can designate the game configuration in `configs/hanabi_rainbow.gin`, where you may change the player numbers and running iterations. Specifically, to change the number of players, please change the code as follows. The entry point to run a Rainbow agent on the Hanabi environment is `train.py`.
 
-Assuming you are running from the agent directory `hanabi_learning_environment/agents/rainbow`, you can control the activation of HCIC and GOIR modules by:
+| |2|3|4|
+|----|----|----|----|
+|`create_environment.num_players` in `configs/hanabi_rainbow.gin` |2|3|4|
+|Line 8 `num_players` in `ToMmodel/dataset.py`|2|3|4|
+|Line 193 `max_discard` in `ToMmodel/dataset.py`|20|20|10|
+
+Assuming you are running from the agent directory `hanabi_learning_environment/agents/rainbow`, you can control the activation of HCIC and GOIR modules by running the following command. Please first change the `path_to_pb` to the path of the `.pb` model corresponding to the number of people. 
 ```
 python -um train  \
   --base_dir=/tmp/hanabi_rainbow \
